@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+.perspective-3d {
+    perspective: 1000px;
+  }
+  
+  .neon-glow {
+    box-shadow: 0 0 15px rgba(255, 0, 255, 0.6), 0 0 25px rgba(255, 0, 255, 0.8);
+  }
+  
+  .glow {
+    box-shadow: 0 0 20px #6EE7B7, 0 0 30px #6EE7B7;
+  }
+  
+  .translate-z-64 {
+    transform: translateZ(200px);
+  }
+  
+  .testimonial-background {
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+    padding: 4rem 0;
+  }
+  
+  .testimonial-card {
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+  }
