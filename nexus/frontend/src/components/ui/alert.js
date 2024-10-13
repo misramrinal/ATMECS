@@ -1,10 +1,7 @@
-import * as React from "react"
-import { cva } from "class-variance-authority"
-import { AlertTriangle, Terminal, AlertCircle, Info } from "lucide-react"
-
-export function cn(...classes) {
-    return classes.filter(Boolean).join(' ');
-  }
+import * as React from "react";
+import { cn } from "../lib/utils";
+import { cva } from "class-variance-authority";
+import { AlertCircle } from "lucide-react";
 
 const alertVariants = cva(
   "relative w-full rounded-lg border p-4 [&>svg~*]:pl-7 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground",
@@ -14,17 +11,13 @@ const alertVariants = cva(
         default: "bg-background text-foreground",
         destructive:
           "border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive",
-        success:
-          "border-emerald-500/50 text-emerald-500 dark:border-emerald-500 [&>svg]:text-emerald-500",
-        warning:
-          "border-yellow-500/50 text-yellow-500 dark:border-yellow-500 [&>svg]:text-yellow-500",
       },
     },
     defaultVariants: {
       variant: "default",
     },
   }
-)
+);
 
 const Alert = React.forwardRef(({ className, variant, ...props }, ref) => (
   <div
@@ -33,8 +26,8 @@ const Alert = React.forwardRef(({ className, variant, ...props }, ref) => (
     className={cn(alertVariants({ variant }), className)}
     {...props}
   />
-))
-Alert.displayName = "Alert"
+));
+Alert.displayName = "Alert";
 
 const AlertTitle = React.forwardRef(({ className, ...props }, ref) => (
   <h5
@@ -42,8 +35,8 @@ const AlertTitle = React.forwardRef(({ className, ...props }, ref) => (
     className={cn("mb-1 font-medium leading-none tracking-tight", className)}
     {...props}
   />
-))
-AlertTitle.displayName = "AlertTitle"
+));
+AlertTitle.displayName = "AlertTitle";
 
 const AlertDescription = React.forwardRef(({ className, ...props }, ref) => (
   <div
@@ -51,7 +44,21 @@ const AlertDescription = React.forwardRef(({ className, ...props }, ref) => (
     className={cn("text-sm [&_p]:leading-relaxed", className)}
     {...props}
   />
-))
-AlertDescription.displayName = "AlertDescription"
+));
+AlertDescription.displayName = "AlertDescription";
 
-export { Alert, AlertTitle, AlertDescription }
+const Progress = React.forwardRef(({ className, value, max = 100, ...props }, ref) => (
+  <div
+    ref={ref}
+    className={cn("relative h-2 w-full overflow-hidden rounded-full bg-blue-200", className)}
+    {...props}
+  >
+    <div
+      className="h-full w-full flex-1 bg-blue-600 transition-all"
+      style={{ transform: `translateX(-${100 - (value / max) * 100}%)` }}
+    />
+  </div>
+));
+Progress.displayName = "Progress";
+
+export { Alert, AlertTitle, AlertDescription, Progress };

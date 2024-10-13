@@ -20,8 +20,8 @@ const FeaturePage = () => {
     },
     {
       icon: Zap,
-      title: 'Lightning Fast Processing',
-      description: 'Reduce decision-making time by 50% with rapid data analysis and insights generation',
+      title: 'Few-shot learning',
+      description: 'Few-shot learning enables rapid adaptation to diverse scenarios with minimal data.',
       details: [
         'Sub-second query processing',
         'Real-time data updates and indexing',
@@ -53,8 +53,8 @@ const FeaturePage = () => {
     },
     {
       icon: Globe,
-      title: 'Global Scalability',
-      description: 'Seamlessly scale across multiple regions while maintaining performance',
+      title: 'Data Visualisation',
+      description: 'Intelligent output differentiation between visual and textual insights optimizes user experience.',
       details: [
         'Multi-region deployment support',
         'Automatic load balancing',
@@ -86,8 +86,8 @@ const FeaturePage = () => {
     },
     {
       icon: GitBranch,
-      title: 'Version Control',
-      description: 'Track and manage changes to your knowledge base over time',
+      title: 'Open Source',
+      description: 'Cost-effective and efficient RAG system that powers our application’s ability to provide relevant insights and answers from the uploaded data.',
       details: [
         'Git-like versioning for knowledge bases',
         'Rollback and restore capabilities',

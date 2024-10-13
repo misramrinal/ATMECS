@@ -10,7 +10,7 @@ import {
   AlertTitle,
 } from '../components/ui/alert';
 
-const NexusAIChat = () => {
+const Nexus = () => {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -25,7 +25,7 @@ const NexusAIChat = () => {
   const [uploadStatus, setUploadStatus] = useState(null);
   const progressCheckInterval = useRef(null);
   const [imageUrl, setImageUrl] = useState(null);
-  
+  const [datasetUrl, setDatasetUrl] = useState(null);
 
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -92,41 +92,81 @@ const NexusAIChat = () => {
     const formData = new FormData();
     formData.append('file', file);
   
-    try {
-      const response = await axios.post('http://localhost:5000/process_file', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        onUploadProgress: (progressEvent) => {
-          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-          setUploadProgress(Math.min(95, progress)); // Cap at 95% until server confirms completion
-        },
-      });
-  
-      if (response.data.file_id) {
-        const fileId = response.data.file_id;
-        progressCheckInterval.current = setInterval(() => checkUploadProgress(fileId), 1000);
-        
-        setFileType(response.data.file_type);
+    const fileExtension = file.name.split('.').pop().toLowerCase();
+    setFileType(fileExtension);
+
+    if (fileExtension === 'csv') {
+      // CSV file handling (VisualisePage logic)
+      try {
+        const response = await axios.post('http://localhost:8000/upload_to_github', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+          onUploadProgress: (progressEvent) => {
+            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setUploadProgress(Math.min(95, progress));
+          },
+        });
+    
+        setDatasetUrl(response.data.dataset_url);
+        setUploadStatus('completed');
+        setUploadProgress(100);
+        showToast(`${file.name} uploaded successfully`, 'success');
+    
         const aiMessage = {
           type: 'ai',
-          content: `${file.name} processed successfully. You can now ask questions about it.`,
+          content: `${file.name} uploaded successfully. You can now ask questions about it.`,
         };
         setMessages(prev => [...prev, aiMessage]);
-      } else {
-        console.error('No file_id received from server');
-        showToast('Error: Unable to track file processing', 'error');
+    
+      } catch (error) {
+        console.error('Error uploading file:', error);
+        const errorMessage = error.response?.data?.error || 'An unknown error occurred while uploading the file.';
+        setError(errorMessage);
+        setUploadStatus('error');
+        showToast(`Error: ${errorMessage}`, 'error');
       }
-  
-    } catch (error) {
-      console.error('Error processing file:', error);
-      const errorMessage = error.response?.data?.error || 'An unknown error occurred while processing the file.';
-      setError(errorMessage);
-      setUploadStatus('error');
-      showToast(`Error: ${errorMessage}`, 'error');
-    } finally {
+    } else if (fileExtension === 'pdf') {
+      // PDF file handling (DemoPage logic)
+      try {
+        const response = await axios.post('http://localhost:5000/process_file', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+          onUploadProgress: (progressEvent) => {
+            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setUploadProgress(Math.min(95, progress));
+          },
+        });
+    
+        if (response.data.file_id) {
+          const fileId = response.data.file_id;
+          progressCheckInterval.current = setInterval(() => checkUploadProgress(fileId), 1000);
+          
+          const aiMessage = {
+            type: 'ai',
+            content: `${file.name} processed successfully. You can now ask questions about it.`,
+          };
+          setMessages(prev => [...prev, aiMessage]);
+        } else {
+          console.error('No file_id received from server');
+          showToast('Error: Unable to track file processing', 'error');
+        }
+    
+      } catch (error) {
+        console.error('Error processing file:', error);
+        const errorMessage = error.response?.data?.error || 'An unknown error occurred while processing the file.';
+        setError(errorMessage);
+        setUploadStatus('error');
+        showToast(`Error: ${errorMessage}`, 'error');
+      }
+    } else {
+      showToast('Unsupported file type. Please upload a CSV or PDF file.', 'error');
       setIsFileProcessing(false);
+      return;
     }
+  
+    setIsFileProcessing(false);
   };
 
   const handleSendMessage = async () => {
@@ -144,20 +184,44 @@ const NexusAIChat = () => {
     setImageUrl(null);
 
     try {
-      const response = await axios.post('http://localhost:5000/query', {
-        query: inputValue,
-        file_type: fileType
-      });
+      let response;
+      if (fileType === 'csv') {
+        response = await axios.post('http://localhost:8000/get_results', {
+          prompt: inputValue,
+          dataset_url: datasetUrl
+        });
 
-      const aiMessage = {
-        type: 'ai',
-        content: response.data.answer,
-      };
-      setMessages(prev => [...prev, aiMessage]);
+        if (response.data.error) {
+          throw new Error(response.data.error);
+        }
+
+        const aiMessage = {
+          type: 'ai',
+          content: response.data.answer,
+        };
+
+        const imageUrlMatch = aiMessage.content.match(/!\[.*?\]\((https:\/\/.*?\.png)\)/);
+        if (imageUrlMatch) {
+          aiMessage.imageUrl = imageUrlMatch[1];
+        }
+        
+        setMessages(prev => [...prev, aiMessage]);
+      } else if (fileType === 'pdf') {
+        response = await axios.post('http://localhost:5000/query', {
+          query: inputValue,
+        });
+
+        const aiMessage = {
+          type: 'ai',
+          content: response.data.answer,
+        };
+        setMessages(prev => [...prev, aiMessage]);
+      }
     } catch (error) {
       console.error('Error querying the model:', error);
-      setError('An error occurred while processing your request. Please try again.');
-      showToast('Error processing request', 'error');
+      const errorMessage = error.response?.data?.error || error.message || 'An unknown error occurred while processing your request.';
+      setError(errorMessage);
+      showToast(`Error: ${errorMessage}`, 'error');
     } finally {
       setIsTyping(false);
     }
@@ -190,20 +254,20 @@ const NexusAIChat = () => {
           }}
           className="mb-8"
         >
-          <FileText className="w-32 h-32 text-blue-400" />
+          <FileText className="w-24 h-24 text-blue-400" />
         </motion.div>
-        <h2 className="text-4xl font-bold text-blue-400 mb-6">
+        <h2 className="text-3xl font-bold text-blue-400 mb-4">
           {uploadStatus === 'uploading' ? 'Uploading File' : 'Processing File'}
         </h2>
-        <div className="w-80 mx-auto mb-6">
-          <Progress value={uploadProgress} max={100} className="h-2" />
-          <p className="text-lg text-gray-300 mt-3">{uploadProgress}% Complete</p>
+        <div className="w-64 mx-auto mb-4">
+          <Progress value={uploadProgress} max={100} />
+          <p className="text-sm text-gray-300 mt-2">{uploadProgress}% Complete</p>
         </div>
         {uploadStatus === 'error' && (
-          <Alert variant="destructive" className="mt-4">
-            <AlertCircle className="h-5 w-5" />
-            <AlertTitle className="text-lg">Error</AlertTitle>
-            <AlertDescription className="text-base">{error}</AlertDescription>
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
       </div>
@@ -220,21 +284,21 @@ const NexusAIChat = () => {
         transition={{ duration: 0.3 }}
         className={`flex ${isAI ? 'justify-start' : 'justify-end'} mb-4`}
       >
-        <div className={`flex ${isAI ? 'flex-row' : 'flex-row-reverse'} items-start max-w-[80%] group`}>
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+        <div className={`flex ${isAI ? 'flex-row' : 'flex-row-reverse'} items-start max-w-[90%] group`}>
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
             isAI ? 'bg-blue-600' : 'bg-purple-600'
-          } shadow-lg ${isAI ? 'mr-3' : 'ml-3'}`}>
-            {isAI ? <Brain size={24} className="text-white" /> : <User size={24} className="text-white" />}
+          } shadow-lg ${isAI ? 'mr-4' : 'ml-4'}`}>
+            {isAI ? <Brain size={28} className="text-white" /> : <User size={28} className="text-white" />}
           </div>
-          <div className={`p-4 ${
+          <div className={`p-5 ${
             isAI ? 'bg-blue-900/50' : 'bg-purple-900/50'
           } rounded-2xl shadow-lg backdrop-blur-sm border border-opacity-30 ${
             isAI ? 'border-blue-400' : 'border-purple-400'
           }`}>
-            <p className="text-gray-100 text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
-            {isAI && imageUrl && (
-              <div className="mt-4">
-                <img src={imageUrl} alt="Response visualization" className="max-w-full rounded-lg shadow-md" />
+            <p className="text-gray-100 text-base leading-relaxed whitespace-pre-wrap">{message.content}</p>
+            {message.imageUrl && (
+              <div className="mt-5">
+                <img src={message.imageUrl} alt="Generated visualization" className="max-w-full h-auto rounded-lg shadow-lg" />
               </div>
             )}
           </div>
@@ -243,10 +307,9 @@ const NexusAIChat = () => {
     );
   };
 
-
   return (
     <div className="min-h-screen bg-[url('https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=2072&auto=format&fit=crop')] bg-cover bg-center text-white flex items-center justify-center p-8">
-      <div className="w-full max-w-7xl h-[90vh] bg-black/40 backdrop-blur-md rounded-3xl overflow-hidden shadow-2xl flex flex-col relative border border-blue-500/30">
+      <div className="w-full max-w-8xl h-[100vh] bg-black/40 backdrop-blur-md rounded-3xl overflow-hidden shadow-2xl flex flex-col relative border border-blue-500/30">
         <AnimatePresence>
           {isFileProcessing && <LoadingOverlay />}
         </AnimatePresence>
@@ -257,7 +320,7 @@ const NexusAIChat = () => {
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.5 }}
-          className="p-6 border-b border-blue-500/30 flex justify-between items-center relative z-10"
+          className="p-4 border-b border-blue-500/30 flex justify-between items-center relative z-10"
         >
           <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-cyan-400 to-purple-400 flex items-center">
             <Brain size={40} className="mr-3 text-blue-400" /> Nexus AI
@@ -271,7 +334,7 @@ const NexusAIChat = () => {
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              className={`px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-full flex items-center text-base font-medium transition-colors ${isFileProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`px-5 py-3 bg-blue-600 hover:bg-blue-700 rounded-full flex items-center text-base font-medium transition-colors ${isFileProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
               onClick={() => !isFileProcessing && fileInputRef.current.click()}
               disabled={isFileProcessing}
             >
@@ -352,4 +415,4 @@ const NexusAIChat = () => {
   );
 };
 
-export default NexusAIChat;
+export default Nexus;

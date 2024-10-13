@@ -1,87 +1,173 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
+from werkzeug.utils import secure_filename
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain.vectorstores import Chroma
 from langchain_mistralai import ChatMistralAI
-from langchain.chains import RetrievalQA
-from langchain_core.prompts import PromptTemplate
+from langchain import hub
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
+from langchain_core.prompts import PromptTemplate
+from langchain.chains import ConversationChain
+from langchain.memory import ConversationBufferMemory
+import uuid
+from collections import defaultdict
+import time
+import re
 
 app = Flask(__name__)
 CORS(app)
 
 # Constants
-INDEX_PATH = './faiss_index'
-DOC_PATH = './NVIDIA-2024-Annual-Report.pdf'
+UPLOAD_FOLDER = './uploads'
+ALLOWED_EXTENSIONS = {'pdf'}
+INDEX_PATH = './chroma_db'
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # Set Mistral API key
-os.environ["MISTRAL_API_KEY"] = "a9A16J2gV70DXUS5p28EUS7Ugtb6F3S9"
+os.environ["MISTRAL_API_KEY"] = "HrBozeMBZ61JZLCdQrqksACzmseeM14m"
+
+# Ensure upload folder exists
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Global variables
+DOC_PATH = None
+retriever = None
+vectorstore = None
+llm = None
+conversation = None
+
+# Global variable to store upload progress
+file_upload_progress = defaultdict(lambda: {'status': 'uploading', 'progress': 0})
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def initialize_components():
+    global retriever, vectorstore, llm, conversation
     try:
         if not os.path.exists(DOC_PATH):
             raise FileNotFoundError(f"PDF file not found at {DOC_PATH}")
 
-        # Use a more powerful embedding model
-        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
-
-        # Load and process the PDF
+        print(f"Loading file: {DOC_PATH}")
         loader = PyPDFLoader(DOC_PATH)
-        pages = loader.load_and_split()
+        docs = loader.load()
+        print("PDF loaded successfully")
         
-        # Use a more sophisticated text splitter
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
-            length_function=len,
-            separators=["\n\n", "\n", " ", ""]
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+        chunks = text_splitter.split_documents(docs)
+        print(f"Text split into {len(chunks)} chunks")
+
+        hf_embeddings = HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2')
+
+        print("Creating vector store...")
+        vectorstore = Chroma.from_documents(documents=chunks, embedding=hf_embeddings, persist_directory=INDEX_PATH)
+        print("Vector store created successfully")
+
+        retriever = vectorstore.as_retriever()
+        print("Retriever initialized successfully")
+
+        llm = ChatMistralAI(model="mistral-medium")
+        print("Language model initialized successfully")
+
+        # Initialize conversation components
+        conversation_prompt = PromptTemplate.from_template("""
+        The following is a conversation between a helpful assistant and a user. The assistant has access to memory of past interactions and make
+        answers more formal and be concise with the answer but providing helpful insights.
+
+        Conversation History:
+        {history}
+
+        User: {input}
+        Assistant:""")
+
+        conversation_memory = ConversationBufferMemory(return_messages=True)
+        conversation = ConversationChain(
+            llm=llm,
+            memory=conversation_memory,
+            prompt=conversation_prompt,
+            verbose=True
         )
-        chunks = text_splitter.split_documents(pages)
-
-        # Use FAISS for better retrieval performance
-        vectorstore = FAISS.from_documents(chunks, embeddings)
-        
-        # Save the index for future use
-        vectorstore.save_local(INDEX_PATH)
-
-        return vectorstore.as_retriever(search_kwargs={"k": 5})
+        print("Conversation chain initialized successfully")
 
     except Exception as e:
         print(f"Initialization error: {str(e)}")
+        print(f"Error occurred at {e.__traceback__.tb_lineno}")
         raise
 
-retriever = initialize_components()
-
-# Initialize Mistral LLM
-llm = ChatMistralAI(model="mistral-large-latest", temperature=0.2)
-
 # Improved RAG prompt
-template = """You are an AI assistant specialized in providing information from NVIDIA's 2024 Annual Report. 
+template = """
 Use the following pieces of context to answer the question at the end.
-If you don't know the answer or the information is not present in the given context, just say that you don't have that information in the report, don't try to make up an answer.
-Provide a concise and accurate answer based solely on the given context. 
+If you don't know the answer, just say that you don't know, don't try to make up an answer.
+Use maximum and keep the answer as concise as possible. Add thank u at the end.
 
-Context:
 {context}
 
 Question: {question}
 
-Helpful Answer:"""
+Helpful Answer:
+"""
 custom_rag_prompt = PromptTemplate.from_template(template)
 
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
-rag_chain = (
-    {"context": retriever | format_docs, "question": RunnablePassthrough()}
-    | custom_rag_prompt
-    | llm
-    | StrOutputParser()
-)
+def is_sensitive_query(query):
+    sensitive_patterns = [
+        r"reveal.*secret.*password",
+        r"bypass.*security",
+        r"hack.*system",
+        r"toxic.*injection.*attack.*activate.*developer",
+    ]
+    return any(re.search(pattern, query.lower()) for pattern in sensitive_patterns)
+
+@app.route('/process_file', methods=['POST'])
+def process_file():
+    global DOC_PATH
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        file_id = str(uuid.uuid4())  # Generate a unique file_id
+        DOC_PATH = os.path.normpath(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        file.save(DOC_PATH)
+        
+        try:
+            file_upload_progress[file_id]['status'] = 'processing'
+            file_upload_progress[file_id]['progress'] = 50  # Set to 50% when processing starts
+            
+            initialize_components()
+            
+            file_upload_progress[file_id]['status'] = 'completed'
+            file_upload_progress[file_id]['progress'] = 100
+            
+            return jsonify({
+                'message': 'File processed successfully',
+                'file_type': 'pdf',
+                'file_id': file_id
+            }), 200
+        except Exception as e:
+            file_upload_progress[file_id]['status'] = 'error'
+            error_message = f"Error processing file: {str(e)}"
+            print(error_message)  # Log the error server-side
+            return jsonify({'error': error_message, 'file_id': file_id}), 500
+    else:
+        return jsonify({'error': 'Invalid file type'}), 400
+
+@app.route('/upload_progress/<file_id>', methods=['GET'])
+def get_upload_progress(file_id):
+    if file_id == 'undefined' or not file_id:
+        return jsonify({'error': 'Invalid file ID'}), 400
+
+    progress_data = file_upload_progress[file_id]
+    return jsonify(progress_data)
 
 @app.route('/query', methods=['POST'])
 def query_model():
@@ -90,22 +176,43 @@ def query_model():
         if not data or 'query' not in data:
             return jsonify({'error': 'No query provided'}), 400
 
+        if retriever is None or llm is None:
+            return jsonify({'error': 'No document has been processed yet'}), 400
+
         user_query = data['query']
         
-        # Use the rag_chain to get the response
-        response = rag_chain.invoke(user_query)
+        rag_chain = (
+            {"context": retriever | format_docs, "question": RunnablePassthrough()}
+            | custom_rag_prompt
+            | llm
+            | StrOutputParser()
+        )
+        
+        # Use the rag_chain to get the initial response
+        initial_response = rag_chain.invoke(user_query)
+
+        # Guard Railing
+        if is_sensitive_query(user_query):
+            return jsonify({
+                'answer': "I'm sorry, but I can't assist you because of security measures.",
+                'status': 'security_blocked'
+            })
+        
+        # Process the response through the conversation chain
+        time.sleep(30)  # 30 seconds delay to respect rate limits
+        final_response = conversation.predict(input=initial_response)
         
         return jsonify({
-            'answer': response,
-            'status': 'success' 
+            'answer': final_response,
+            'status': 'success'
         })
 
     except Exception as e:
-        print(f"Query error: {str(e)}")
+        print(f"Query error: {str(e)}")  # Keep this for debugging
         return jsonify({
             'error': 'An error occurred while processing your request',
             'details': str(e)
         }), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, use_reloader=False)
