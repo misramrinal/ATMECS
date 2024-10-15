@@ -1,12 +1,18 @@
 <h1 align="center" id="title">Nexus</h1>
-[https://www.youtube.com/watch?v=L\_pbe2i5x9Y](https://www.youtube.com/watch?v=L_pbe2i5x9Y)
 
-<p id="description">Revolutionizing Information Ac![Uploading WhatsApp Image 2024-10-13 at 19.20.05.jpeg…]()
-cess and Decision-Making with Large Language Models and Retrieval-Augmented Generation</p>
+<p align="center"><img src="https://github.com/user-attachments/assets/bacc3753-43ee-43df-bfe7-455f90600b4b" alt="project-image"></p>
+
+<p id="description">Revolutionizing Information Access and Decision-Making with Large Language Models and Retrieval-Augmented Generation</p>
 
 <h2>🚀 Demo</h2>
 
+[https://www.youtube.com/watch?v=L\_pbe2i5x9Y](https://www.youtube.com/watch?v=L_pbe2i5x9Y)
 
+<h2>Project Screenshots:</h2>
+
+<img src="https://github.com/user-attachments/assets/06409a9e-5e2b-445e-bc57-3217f10840fb" alt="project-screenshot" width="500" height="300/">
+
+<img src="https://github.com/user-attachments/assets/d148f803-8941-4fa6-b2c6-1d554cfac6da" alt="project-screenshot" width="500" height="300/">
 
   
   
@@ -31,6 +37,7 @@ Here're some of the project's best features:
 <h2>💻 Built with</h2>
 
 Technologies used in the project:
+
 *   Mistral AI
 *   Langchain
 *   Hugging Face
