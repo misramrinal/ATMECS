@@ -1,10 +1,12 @@
 <h1 align="center" id="title">Nexus</h1>
+[https://www.youtube.com/watch?v=L\_pbe2i5x9Y](https://www.youtube.com/watch?v=L_pbe2i5x9Y)
 
-<p id="description">Revolutionizing Information Access and Decision-Making with Large Language Models and Retrieval-Augmented Generation</p>
+<p id="description">Revolutionizing Information Ac![Uploading WhatsApp Image 2024-10-13 at 19.20.05.jpeg…]()
+cess and Decision-Making with Large Language Models and Retrieval-Augmented Generation</p>
 
 <h2>🚀 Demo</h2>
 
-[https://www.youtube.com/watch?v=L\_pbe2i5x9Y](https://www.youtube.com/watch?v=L_pbe2i5x9Y)
+
 
   
   
