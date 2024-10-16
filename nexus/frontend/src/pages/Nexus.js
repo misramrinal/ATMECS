@@ -43,7 +43,7 @@ const Nexus = () => {
 
   const showToast = (message, type) => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), 10000);
   };
 
   const hideToast = () => {
@@ -98,7 +98,7 @@ const Nexus = () => {
     if (fileExtension === 'csv') {
       // CSV file handling (VisualisePage logic)
       try {
-        const response = await axios.post('http://localhost:8000/upload_to_github', formData, {
+        const response = await axios.post('http://localhost:5000/upload_to_github', formData, {
           headers: {
             'Content-Type': 'multipart/form-data',
           },
@@ -186,7 +186,7 @@ const Nexus = () => {
     try {
       let response;
       if (fileType === 'csv') {
-        response = await axios.post('http://localhost:8000/get_results', {
+        response = await axios.post('http://localhost:5000/get_results', {
           prompt: inputValue,
           dataset_url: datasetUrl
         });
