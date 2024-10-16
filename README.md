@@ -38,21 +38,20 @@ Please follow the following steps for successful installation:
 1. **Clone the Repository:** Get started by cloning the repository to your local machine.
 
    ```
-   https://github.com/ShaanCoding/makeread.me
+   https://github.com/misramrinal/ATMECS
    ```
 
-2. **Install Frontend Packages:** Navigate to the &quot;/frontend&quot; directory and install the required yarn packages by executing the following command in your terminal:
+2. **Install the packages:** Install the required packages by executing the following command in your terminal:
 
    ```sh
-   yarn install
+   pip install -r requirements.txt
    ```
-
-3. **Install Backend Packages:** Similarly, navigate to the &quot;/backend&quot; directory and install the required yarn packages by executing the following command in your terminal:
+  
+3. **Run the app** Execute the following command in your terminal to run the app:
 
    ```sh
-   yarn install
+   python app.py
    ```
-
 
   
   
