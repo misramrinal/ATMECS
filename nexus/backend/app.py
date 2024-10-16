@@ -1,32 +1,37 @@
+import os
+from collections import defaultdict
+import time
+import re
+import uuid
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import os
 from werkzeug.utils import secure_filename
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import Chroma
 from langchain_mistralai import ChatMistralAI
-from langchain import hub
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.prompts import PromptTemplate
 from langchain.chains import ConversationChain
 from langchain.memory import ConversationBufferMemory
-import uuid
-from collections import defaultdict
-import time
-import re
+from github import Github
 
 app = Flask(__name__)
 CORS(app)
 
 # Constants
 UPLOAD_FOLDER = './uploads'
-ALLOWED_EXTENSIONS = {'pdf'}
+ALLOWED_EXTENSIONS = {'pdf', 'csv'}
 INDEX_PATH = './chroma_db'
+GITHUB_TOKEN = "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"
+REPO_NAME = "ATMECS_dataset"
+CHATCSV_API_KEY = "sk_3ZkvTQE9QBCAuWhxzGbhUQ1a"
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB limit
 
 # Set Mistral API key
 os.environ["MISTRAL_API_KEY"] = "HrBozeMBZ61JZLCdQrqksACzmseeM14m"
@@ -40,8 +45,6 @@ retriever = None
 vectorstore = None
 llm = None
 conversation = None
-
-# Global variable to store upload progress
 file_upload_progress = defaultdict(lambda: {'status': 'uploading', 'progress': 0})
 
 def allowed_file(filename):
@@ -74,7 +77,6 @@ def initialize_components():
         llm = ChatMistralAI(model="mistral-medium")
         print("Language model initialized successfully")
 
-        # Initialize conversation components
         conversation_prompt = PromptTemplate.from_template("""
         The following is a conversation between a helpful assistant and a user. The assistant has access to memory of past interactions and make
         answers more formal and be concise with the answer but providing helpful insights.
@@ -125,6 +127,29 @@ def is_sensitive_query(query):
     ]
     return any(re.search(pattern, query.lower()) for pattern in sensitive_patterns)
 
+def upload_to_github(file_path, repo_name, github_token):
+    g = Github(github_token)
+    user = g.get_user()
+    
+    try:
+        repo = user.get_repo(repo_name)
+    except:
+        repo = user.create_repo(repo_name)
+    
+    with open(file_path, 'r') as file:
+        content = file.read()
+    
+    filename = os.path.basename(file_path)
+    
+    try:
+        file = repo.get_contents(filename)
+        repo.update_file(file.path, f"Updated {filename}", content, file.sha)
+    except:
+        repo.create_file(filename, f"Added {filename}", content)
+    
+    url = f"https://raw.githubusercontent.com/{user.login}/{repo.name}/main/{filename}"
+    return url
+
 @app.route('/process_file', methods=['POST'])
 def process_file():
     global DOC_PATH
@@ -135,28 +160,39 @@ def process_file():
         return jsonify({'error': 'No selected file'}), 400
     if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
-        file_id = str(uuid.uuid4())  # Generate a unique file_id
-        DOC_PATH = os.path.normpath(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-        file.save(DOC_PATH)
+        file_id = str(uuid.uuid4())
+        file_path = os.path.normpath(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        file.save(file_path)
         
         try:
             file_upload_progress[file_id]['status'] = 'processing'
-            file_upload_progress[file_id]['progress'] = 50  # Set to 50% when processing starts
-            
-            initialize_components()
-            
+            file_upload_progress[file_id]['progress'] = 50
+
+            if filename.lower().endswith('.pdf'):
+                DOC_PATH = file_path
+                initialize_components()
+            elif filename.lower().endswith('.csv'):
+                dataset_url = upload_to_github(file_path, REPO_NAME, GITHUB_TOKEN)
+                os.remove(file_path)
+                return jsonify({
+                    'message': 'File processed successfully',
+                    'file_type': 'csv',
+                    'file_id': file_id,
+                    'dataset_url': dataset_url
+                }), 200
+
             file_upload_progress[file_id]['status'] = 'completed'
             file_upload_progress[file_id]['progress'] = 100
             
             return jsonify({
                 'message': 'File processed successfully',
-                'file_type': 'pdf',
+                'file_type': 'pdf' if filename.lower().endswith('.pdf') else 'csv',
                 'file_id': file_id
             }), 200
         except Exception as e:
             file_upload_progress[file_id]['status'] = 'error'
             error_message = f"Error processing file: {str(e)}"
-            print(error_message)  # Log the error server-side
+            print(error_message)
             return jsonify({'error': error_message, 'file_id': file_id}), 500
     else:
         return jsonify({'error': 'Invalid file type'}), 400
@@ -188,18 +224,15 @@ def query_model():
             | StrOutputParser()
         )
         
-        # Use the rag_chain to get the initial response
         initial_response = rag_chain.invoke(user_query)
 
-        # Guard Railing
         if is_sensitive_query(user_query):
             return jsonify({
                 'answer': "I'm sorry, but I can't assist you because of security measures.",
                 'status': 'security_blocked'
             })
         
-        # Process the response through the conversation chain
-        time.sleep(30)  # 30 seconds delay to respect rate limits
+        time.sleep(30)
         final_response = conversation.predict(input=initial_response)
         
         return jsonify({
@@ -208,11 +241,80 @@ def query_model():
         })
 
     except Exception as e:
-        print(f"Query error: {str(e)}")  # Keep this for debugging
+        print(f"Query error: {str(e)}")
         return jsonify({
             'error': 'An error occurred while processing your request',
             'details': str(e)
         }), 500
 
+@app.route('/get_results', methods=['POST'])
+def get_results():
+    data = request.json
+    if not data or 'prompt' not in data or 'dataset_url' not in data:
+        return jsonify({'error': 'Missing prompt or dataset URL'}), 400
+
+    url = 'https://www.chatcsv.co/api/v1/chat'
+    headers = {
+        'accept': 'text/event-stream',
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {CHATCSV_API_KEY}'
+    }
+    payload = {
+        "model": "gpt-3.5-turbo",
+        "messages": [
+            {
+                "role": "user",
+                "content": data['prompt']
+            }
+        ],
+        "files": [
+            data['dataset_url']
+        ]
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload, stream=True)
+        response.raise_for_status()
+        
+        full_response = ''
+        for line in response.iter_lines(decode_unicode=True):
+            if line:
+                full_response += line + '\n'
+        
+        full_response = full_response.replace("An error occurred: 'gpt-3.5-turbo'", "").strip()
+        
+        if not full_response:
+            full_response = "I'm sorry, I couldn't process your request. Please try again."
+        
+        return jsonify({'answer': full_response}), 200
+    except requests.RequestException as e:
+        return jsonify({'error': f"Request failed: {str(e)}"}), 500
+    
+@app.route('/upload_to_github', methods=['POST'])
+def upload_file_to_github():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(file_path)
+        
+        try:
+            dataset_url = upload_to_github(file_path, REPO_NAME, GITHUB_TOKEN)
+            os.remove(file_path)  # Remove the file after uploading to GitHub
+            return jsonify({'dataset_url': dataset_url}), 200
+        except Exception as e:
+            os.remove(file_path)  # Remove the file if an error occurs
+            return jsonify({'error': str(e)}), 500
+    else:
+        return jsonify({'error': 'Invalid file type'}), 400
+
+
 if __name__ == '__main__':
-    app.run(debug=True, use_reloader=False)
+    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
